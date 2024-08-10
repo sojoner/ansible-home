@@ -1,0 +1,52 @@
+###
+# From Nvidia
+# - https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/getting-started.html
+---
+# roles/nvidia_gpu_operator/tasks/main.yml
+- name: Download Helm installation script
+  get_url:
+    url: https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+    dest: /tmp/get_helm.sh
+    mode: '0700'
+  when: inventory_hostname == server_node
+
+- name: Execute Helm installation script
+  command: /tmp/get_helm.sh
+  args:
+    creates: /usr/local/bin/helm  # Prevents re-running if Helm is already installed
+  when: inventory_hostname == server_node
+
+- name: Remove Helm installation script
+  file:
+    path: /tmp/get_helm.sh
+    state: absent
+  when: inventory_hostname == server_node
+
+- name: Create gpu-operator namespace
+  shell: kubectl create namespace gpu-operator
+  ignore_errors: true  # In case the namespace already exists
+  when: inventory_hostname == server_node
+
+- name: Label gpu-operator namespace
+  shell: kubectl label --overwrite namespace gpu-operator pod-security.kubernetes.io/enforce=privileged
+  when: inventory_hostname == server_node
+
+- name: Add NVIDIA Helm repository
+  shell: helm repo add nvidia https://helm.ngc.nvidia.com/nvidia && helm repo update
+  when: inventory_hostname == server_node
+
+- name: Install NVIDIA GPU Operator
+  shell: >
+    helm install gpu-operator -n gpu-operator --create-namespace
+    nvidia/gpu-operator
+    --set driver.enabled=false
+    --set toolkit.enabled=false
+    --set "toolkit.env[0].name=CONTAINERD_CONFIG"
+    --set "toolkit.env[0].value=/var/lib/rancher/rke2/agent/etc/containerd/config.toml.tmpl"
+    --set "toolkit.env[1].name=CONTAINERD_SOCKET"
+    --set "toolkit.env[1].value=/run/k3s/containerd/containerd.sock"
+    --set "toolkit.env[2].name=CONTAINERD_RUNTIME_CLASS"
+    --set "toolkit.env[2].value=nvidia"
+    --set "toolkit.env[3].name=CONTAINERD_SET_AS_DEFAULT"
+    --set-string "toolkit.env[3].value=true"
+  when: inventory_hostname == server_node

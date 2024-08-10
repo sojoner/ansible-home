@@ -1,0 +1,6 @@
+---
+- name: Update and upgrade Ubuntu
+  become: true
+  apt:
+    upgrade: dist
+    update_cache: yes

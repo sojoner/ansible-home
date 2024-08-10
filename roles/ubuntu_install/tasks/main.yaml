@@ -1,0 +1,36 @@
+---
+- name: Update and upgrade Ubuntu
+  become: true
+  apt:
+    upgrade: dist
+    update_cache: yes
+
+- name: Install nettools
+  apt:
+    name:  net-tools
+    state: present
+    update_cache: yes
+
+- name: Install htop
+  apt:
+    name:  htop
+    state: present
+    update_cache: yes
+
+- name: Install iftop
+  apt:
+    name:  iftop
+    state: present
+    update_cache: yes
+
+- name: Install ethtool
+  apt:
+    name:  ethtool
+    state: present
+    update_cache: yes
+
+- name: Install ethtool
+  apt:
+    name:  ethtool
+    state: present
+    update_cache: yes

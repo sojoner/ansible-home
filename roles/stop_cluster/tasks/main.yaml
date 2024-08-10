@@ -1,0 +1,16 @@
+#Ansible Role: stop_cluster
+---
+# roles/stop_cluster/tasks/main.yml
+- name: Stop RKE2 agents
+  become: true
+  ansible.builtin.systemd:
+    name: rke2-agent
+    state: stopped
+  when: inventory_hostname in groups['workers']
+
+- name: Stop RKE2 server
+  become: true
+  ansible.builtin.systemd:
+    name: rke2-server
+    state: stopped
+  when: inventory_hostname in groups['masters']

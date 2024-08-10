@@ -1,0 +1,16 @@
+#Ansible Role: start_cluster
+---
+# roles/start_cluster/tasks/main.yml
+- name: Start RKE2 server
+  become: true
+  ansible.builtin.systemd:
+    name: rke2-server
+    state: started
+  when: inventory_hostname in groups['masters']
+
+- name: Start RKE2 agents
+  become: true
+  ansible.builtin.systemd:
+    name: rke2-agent
+    state: started
+  when: inventory_hostname in groups['workers']

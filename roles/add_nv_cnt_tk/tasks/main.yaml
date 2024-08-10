@@ -1,0 +1,143 @@
+---
+- name: Install dependencies
+  apt:
+    name:
+      - curl
+      - gnupg
+    state: present
+    update_cache: yes
+  when: inventory_hostname in groups['workers']
+
+- name: Add NVIDIA GPG key
+  apt_key:
+    url: https://nvidia.github.io/libnvidia-container/gpgkey
+    state: present
+  when: inventory_hostname in groups['workers']
+
+- name: Add NVIDIA Container Toolkit repository
+  get_url:
+    url: https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list
+    dest: /etc/apt/sources.list.d/nvidia-container-toolkit.list
+    mode: '0644'
+  when: inventory_hostname in groups['workers']
+
+- name: Update apt cache
+  apt:
+    update_cache: yes
+  when: inventory_hostname in groups['workers']
+
+- name: Install NVIDIA Container Toolkit
+  apt:
+    name: nvidia-container-toolkit
+    state: present
+  when: inventory_hostname in groups['workers']
+
+- name: Ensure RKE2 containerd config directory exists
+  file:
+    path: /var/lib/rancher/rke2/agent/etc/containerd
+    state: directory
+    mode: '0755'
+  when: inventory_hostname in groups['workers']
+
+- name: Configure RKE2 containerd runtime
+  command: nvidia-ctk runtime configure --runtime=containerd --config=/var/lib/rancher/rke2/agent/etc/containerd/config.toml.tmpl
+  register: config_result
+  changed_when: config_result.rc == 0
+  when: inventory_hostname in groups['workers']
+
+- name: Check if RKE2 containerd config exists
+  stat:
+    path: /var/lib/rancher/rke2/agent/etc/containerd/config.toml.tmpl
+  register: rke2_containerd_config
+  when: inventory_hostname in groups['workers']
+
+- name: Display warning if config doesn't exist
+  debug:
+    msg: "Warning: RKE2 containerd config template not found. Please ensure RKE2 is properly installed."
+  when: 
+    - inventory_hostname in groups['workers']
+    - not rke2_containerd_config.stat.exists
+
+- name: Configure containerd for RKE2 agent with NVIDIA support
+  ## This is a workaround for the issue with NVIDIA runtime configuration in RKE2
+  # https://github.com/rancher/rke2/issues/822
+  copy:
+    content: |
+      [plugins.opt]
+        path = "/var/lib/rancher/rke2/agent/containerd"
+
+      [plugins.cri]
+        stream_server_address = "127.0.0.1"
+        stream_server_port = "10010"
+        enable_selinux = false
+        sandbox_image = "index.docker.io/rancher/pause:3.2"
+
+      [plugins.cri.containerd]
+        default_runtime_name = "nvidia"
+        disable_snapshot_annotations = true
+        snapshotter = "overlayfs"
+
+
+      [plugins.cri.containerd.runtimes.runc]
+        runtime_type = "io.containerd.runc.v2"
+
+      [plugins.cri.containerd.runtimes.nvidia]
+        base_runtime_spec = ""
+        container_annotations = []
+        pod_annotations = []
+        privileged_without_host_devices = false
+        runtime_engine = ""
+        runtime_root = ""
+        runtime_type = "io.containerd.runc.v2"
+
+        [plugins.cri.containerd.runtimes.nvidia.options]
+           BinaryName = "/usr/bin/nvidia-container-runtime"
+           CriuImagePath = ""
+           CriuPath = ""
+           CriuWorkPath = ""
+           IoGid = 0
+           IoUid = 0
+           NoNewKeyring = false
+           NoPivotRoot = false
+           Root = ""
+           ShimCgroup = ""
+           SystemdCgroup = false
+    dest: "/var/lib/rancher/rke2/agent/etc/containerd/config.toml.tmpl"
+    owner: root
+    group: root
+    mode: '0644'
+  when: inventory_hostname in groups['workers']
+
+
+- name: Restart RKE2 agent
+  systemd:
+    name: rke2-agent
+    state: restarted
+  when: inventory_hostname in groups['workers']
+
+- name: Wait for RKE2 agent to be active
+  systemd:
+    name: rke2-agent
+    state: started
+  register: rke2_agent_status
+  until: rke2_agent_status.status.ActiveState == "active"
+  retries: 5
+  delay: 10
+  when: inventory_hostname in groups['workers']
+
+- name: Check RKE2 agent status
+  command: systemctl is-active rke2-agent
+  register: rke2_status
+  changed_when: false
+  failed_when: rke2_status.rc != 0
+  when: inventory_hostname in groups['workers']
+
+- name: Display RKE2 agent status
+  debug:
+    var: rke2_status.stdout
+  when: inventory_hostname in groups['workers']
+
+- name: Check NVIDIA Container Toolkit version
+  command: nvidia-container-cli --version
+  register: nvidia_container_cli_version
+  when: inventory_hostname in groups['workers']

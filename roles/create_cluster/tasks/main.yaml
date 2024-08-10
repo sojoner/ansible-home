@@ -1,0 +1,154 @@
+---
+# roles/create_cluster/tasks/main.yml
+- name: Create RKE2 configuration directory
+  become: true
+  ansible.builtin.file:
+    path: /etc/rancher/rke2
+    state: directory
+    mode: '0755'
+  
+- name: Install RKE2 server
+  become: true
+  ansible.builtin.shell: |
+    curl -sfL https://get.rke2.io | INSTALL_RKE2_VERSION={{ rke2_version }} sh -
+  args:
+    creates: /usr/local/bin/rke2
+  when: inventory_hostname == server_node
+
+- name: Configure RKE2 server
+  become: true
+  ansible.builtin.copy:
+    content: |
+      token: {{ rke2_token | default('defaulttoken123') }}
+      tls-san:
+        - {{ ansible_host }}
+    dest: /etc/rancher/rke2/config.yaml
+    mode: '0600'
+  when: inventory_hostname == server_node
+
+- name: Start RKE2 server
+  become: true
+  ansible.builtin.systemd:
+    name: rke2-server
+    state: started
+    enabled: yes
+  when: inventory_hostname == server_node
+
+- name: Wait for node-token
+  become: true
+  ansible.builtin.wait_for:
+    path: /var/lib/rancher/rke2/server/node-token
+  when: inventory_hostname == server_node
+
+- name: Get node token
+  become: true
+  ansible.builtin.slurp:
+    src: /var/lib/rancher/rke2/server/node-token
+  register: node_token
+  when: inventory_hostname == server_node
+
+- name: Set fact for node token
+  become: true
+  ansible.builtin.set_fact:
+    rke2_token: "{{ node_token['content'] | b64decode | trim }}"
+  when: inventory_hostname == server_node
+
+- name: Install RKE2 on agent nodes
+  become: true
+  ansible.builtin.shell: |
+    curl -sfL https://get.rke2.io | INSTALL_RKE2_TYPE="agent" INSTALL_RKE2_VERSION={{ rke2_version }} sh -
+  args:
+    creates: /usr/local/bin/rke2
+  when: inventory_hostname in agent_nodes
+
+- name: Configure RKE2 agents
+  become: true
+  ansible.builtin.copy:
+    content: |
+      server: https://{{ hostvars[server_node]['ansible_host'] }}:9345
+      token: {{ rke2_token | default('defaulttoken123') }}
+    dest: /etc/rancher/rke2/config.yaml
+    mode: '0600'
+  when: inventory_hostname in agent_nodes
+
+- name: Create systemd service file for RKE2 agent
+  become: true
+  ansible.builtin.copy:
+    content: |
+      [Unit]
+      Description=Rancher Kubernetes Engine v2 (RKE2) Agent
+      Documentation=https://docs.rke2.io
+      Wants=network-online.target
+      After=network-online.target
+
+      [Service]
+      Type=exec
+      EnvironmentFile=-/etc/default/%N
+      EnvironmentFile=-/etc/sysconfig/%N
+      KillMode=process
+      Delegate=yes
+      LimitNOFILE=1048576
+      LimitNPROC=infinity
+      LimitCORE=infinity
+      TasksMax=infinity
+      TimeoutStartSec=0
+      Restart=always
+      RestartSec=5s
+      ExecStartPre=-/sbin/modprobe br_netfilter
+      ExecStartPre=-/sbin/modprobe overlay
+      ExecStart=/usr/local/bin/rke2 agent
+
+      [Install]
+      WantedBy=multi-user.target
+    dest: /etc/systemd/system/rke2-agent.service
+    mode: '0644'
+  when: inventory_hostname in agent_nodes
+
+- name: Reload systemd
+  become: true
+  ansible.builtin.systemd:
+    daemon_reload: yes
+  when: inventory_hostname in agent_nodes
+
+- name: Enable and start RKE2 agent service
+  become: true
+  ansible.builtin.systemd:
+    name: rke2-agent
+    state: started
+    enabled: yes
+  when: inventory_hostname in agent_nodes
+
+# Common tasks
+- name: Create kubectl symlink
+  become: true
+  ansible.builtin.file:
+    src: /var/lib/rancher/rke2/bin/kubectl
+    dest: /usr/local/bin/kubectl
+    state: link
+  when: inventory_hostname == server_node
+
+- name: Set KUBECONFIG environment variable
+  become: true
+  ansible.builtin.lineinfile:
+    path: /etc/environment
+    line: "KUBECONFIG=/etc/rancher/rke2/rke2.yaml"
+    create: yes
+  when: inventory_hostname == server_node
+
+- name: Wait for nodes to be ready
+  become: true
+  ansible.builtin.command: kubectl get nodes
+  register: kubectl_result
+  until: kubectl_result.rc == 0
+  retries: 12
+  delay: 10
+  when: inventory_hostname == server_node
+
+
+- name: Download KUBE_CONFIG from master node
+  ansible.builtin.fetch:
+    src: "/etc/rancher/rke2/rke2.yaml"
+    dest: "./tmp/rke2_created.yaml"
+    flat: yes
+  when: inventory_hostname == server_node
+

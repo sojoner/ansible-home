@@ -1,0 +1,10 @@
+---
+- name: Update and upgrade Ubuntu
+  become: true
+  apt:
+    upgrade: dist
+    update_cache: yes
+
+- name: Delay shutting down the remote node
+  community.general.shutdown:
+    delay: 10

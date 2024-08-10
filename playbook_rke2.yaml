@@ -1,0 +1,22 @@
+---
+- name: Manage RKE2 Cluster
+  hosts: k8s_cluster
+  become: yes
+  vars:
+    rke2_version: v1.30.3+rke2r1
+    server_node: "{{ groups['masters'][0] }}"
+    agent_nodes: "{{ groups['workers'] }}"
+
+  roles:
+    - role: create_cluster
+      when: action == 'create'
+    - role: start_cluster
+      when: action == 'start'
+    - role: stop_cluster
+      when: action == 'stop'
+    - role: cleanup_cluster
+      when: action == 'cleanup'
+    - role: add_nv_cnt_tk
+      when: action == 'add_nv_cnt_tk'
+    - role: add_nv_gpu_op
+      when: action == 'add_nv_gpu_op'
