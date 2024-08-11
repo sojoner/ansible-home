@@ -1,16 +1,50 @@
-#Ansible Role: stop_cluster
 ---
 # roles/stop_cluster/tasks/main.yml
-- name: Stop RKE2 agents
+
+- name: Get Kubernetes node names
   become: true
-  ansible.builtin.systemd:
+  command: /var/lib/rancher/rke2/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml get nodes -o jsonpath='{.items[*].metadata.name}'
+  register: k8s_node_names
+  delegate_to: "{{ groups['masters'][0] }}"
+  run_once: true
+
+- name: Create list of K8s node names
+  set_fact:
+    k8s_nodes: "{{ k8s_node_names.stdout.split() }}"
+  run_once: true
+
+- name: Stop RKE2 agent on worker nodes
+  become: true
+  systemd:
     name: rke2-agent
     state: stopped
   when: inventory_hostname in groups['workers']
 
-- name: Stop RKE2 server
+- name: Stop RKE2 server on master nodes (except the last one)
   become: true
-  ansible.builtin.systemd:
+  systemd:
     name: rke2-server
     state: stopped
-  when: inventory_hostname in groups['masters']
+  when: inventory_hostname in groups['masters'][:-1]
+
+
+- name: Stop RKE2 server on the last master node
+  become: true
+  systemd:
+    name: rke2-server
+    state: stopped
+  when: inventory_hostname == groups['masters'][-1]
+
+- name: Wait for final shutdown
+  pause:
+    seconds: 10
+
+- name: Verify all nodes are stopped
+  become: true
+  command: systemctl is-active {{ item }}
+  register: service_status
+  failed_when: service_status.stdout == "active"
+  loop:
+    - rke2-agent
+    - rke2-server
+  ignore_errors: true

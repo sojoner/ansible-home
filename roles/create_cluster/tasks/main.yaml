@@ -118,7 +118,92 @@
     enabled: yes
   when: inventory_hostname in agent_nodes
 
+# Storage class
+- name: Get Kubernetes node names
+  become: true
+  ansible.builtin.command: kubectl get nodes -o jsonpath='{.items[*].metadata.name}'
+  register: k8s_nodes
+  when: inventory_hostname == server_node
+
+- name: Set fact for Kubernetes node names
+  ansible.builtin.set_fact:
+    k8s_node_names: "{{ k8s_nodes.stdout.split() }}"
+  when: inventory_hostname == server_node
+
+- name: Display Kubernetes node names
+  ansible.builtin.debug:
+    var: k8s_node_names
+  when: inventory_hostname == server_node
+
+- name: Update apt cache
+  become: true
+  apt:
+    update_cache: yes
+  when: inventory_hostname == server_node
+
+- name: Install required Python packages
+  become: true
+  apt:
+    name:
+      - python3-kubernetes
+      - python3-yaml
+    state: present
+  when: inventory_hostname == server_node
+
+- name: Check if local-path-storage namespace exists
+  become: true
+  command: kubectl get namespace local-path-storage
+  register: namespace_check
+  ignore_errors: true
+  when: inventory_hostname == server_node
+
+- name: Create local-path-storage namespace if it doesn't exist
+  become: true
+  command: kubectl create namespace local-path-storage
+  when: 
+    - inventory_hostname == server_node
+    - namespace_check.rc != 0
+
+- name: Deploy Local Path Provisioner
+  become: true
+  command: kubectl apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/master/deploy/local-path-storage.yaml
+  when: inventory_hostname == server_node
+
+- name: Check if local-path is already default storage class
+  become: true
+  command: kubectl get storageclass local-path -o jsonpath='{.metadata.annotations.storageclass\.kubernetes\.io/is-default-class}'
+  register: default_sc_check
+  ignore_errors: true
+  when: inventory_hostname == server_node
+
+- name: Set Local Path Provisioner as default storage class
+  become: true
+  command: >
+    kubectl patch storageclass local-path -p 
+    '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
+  when:
+    - inventory_hostname == server_node
+    - default_sc_check.stdout != "true"
+
+
 # Common tasks
+- name: Check if kubectl exists
+  become: true
+  ansible.builtin.stat:
+    path: /usr/local/bin/kubectl
+  register: kubectl_stat
+  when: inventory_hostname == server_node
+
+- name: Remove existing kubectl if it's a regular file
+  become: true
+  ansible.builtin.file:
+    path: /usr/local/bin/kubectl
+    state: absent
+  when: 
+    - inventory_hostname == server_node
+    - kubectl_stat.stat.exists
+    - not kubectl_stat.stat.islnk
+
 - name: Create kubectl symlink
   become: true
   ansible.builtin.file:

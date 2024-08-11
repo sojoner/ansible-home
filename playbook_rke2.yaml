@@ -3,7 +3,8 @@
   hosts: k8s_cluster
   become: yes
   vars:
-    rke2_version: v1.30.3+rke2r1
+    #rke2_version: v1.30.3+rke2r1
+    rke2_version: v1.31.2+rke2r1
     server_node: "{{ groups['masters'][0] }}"
     agent_nodes: "{{ groups['workers'] }}"
 

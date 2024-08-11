@@ -1,16 +1,52 @@
-#Ansible Role: start_cluster
 ---
 # roles/start_cluster/tasks/main.yml
-- name: Start RKE2 server
+
+- name: Start RKE2 server on master nodes
   become: true
-  ansible.builtin.systemd:
+  systemd:
     name: rke2-server
     state: started
   when: inventory_hostname in groups['masters']
 
-- name: Start RKE2 agents
+- name: Wait for RKE2 server to be up
+  pause:
+    seconds: 60
+  when: inventory_hostname == groups['masters'][0]
+
+- name: Start RKE2 agent on worker nodes
   become: true
-  ansible.builtin.systemd:
+  systemd:
     name: rke2-agent
     state: started
   when: inventory_hostname in groups['workers']
+
+- name: Wait for RKE2 agent to be up
+  pause:
+    seconds: 30
+  when: inventory_hostname in groups['workers']
+
+- name: Get Kubernetes node names
+  become: true
+  ansible.builtin.command: /var/lib/rancher/rke2/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml get nodes -o jsonpath='{.items[*].metadata.name}'
+  register: k8s_nodes
+
+- name: Set fact for Kubernetes node names
+  ansible.builtin.set_fact:
+    k8s_node_names: "{{ k8s_nodes.stdout.split() }}"
+
+- name: Uncordon all nodes
+  become: true
+  ansible.builtin.command: /var/lib/rancher/rke2/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml uncordon {{ item }}
+  loop: "{{ k8s_node_names }}"
+
+- name: Check cluster status
+  become: true
+  command: /var/lib/rancher/rke2/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml get nodes
+  register: cluster_status
+  delegate_to: "{{ groups['masters'][0] }}"
+  run_once: true
+
+- name: Display cluster status
+  debug:
+    var: cluster_status.stdout_lines
+  run_once: true
