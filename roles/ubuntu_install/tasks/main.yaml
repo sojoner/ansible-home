@@ -28,9 +28,3 @@
     name:  ethtool
     state: present
     update_cache: yes
-
-- name: Install ethtool
-  apt:
-    name:  ethtool
-    state: present
-    update_cache: yes
