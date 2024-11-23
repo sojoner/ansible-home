@@ -124,6 +124,7 @@
   ansible.builtin.command: kubectl get nodes -o jsonpath='{.items[*].metadata.name}'
   register: k8s_nodes
   when: inventory_hostname == server_node
+  ignore_errors: true
 
 - name: Set fact for Kubernetes node names
   ansible.builtin.set_fact:

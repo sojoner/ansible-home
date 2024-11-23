@@ -7,6 +7,7 @@
   register: k8s_node_names
   delegate_to: "{{ groups['masters'][0] }}"
   run_once: true
+  ignore_errors: true
 
 - name: Create list of K8s node names
   set_fact:
